@@ -1,7 +1,33 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recharts';
 
-const COLORS = ['#3B82F6', '#8B5CF6', '#F59E0B', '#10B981', '#EF4444', '#06B6D4'];
+// Extended color palette with many distinct colors
+const BASE_COLORS = [
+  '#3B82F6', '#8B5CF6', '#F59E0B', '#10B981', '#EF4444', '#06B6D4',
+  '#EC4899', '#14B8A6', '#F97316', '#6366F1', '#84CC16', '#EAB308',
+  '#A855F7', '#06B6D4', '#F43F5E', '#22C55E', '#3B82F6', '#8B5CF6',
+  '#F59E0B', '#10B981', '#EF4444', '#EC4899', '#14B8A6', '#F97316'
+];
+
+// Generate unique colors for each item
+const generateUniqueColors = (count) => {
+  if (count <= BASE_COLORS.length) {
+    return BASE_COLORS.slice(0, count);
+  }
+  
+  // If we need more colors, generate them using HSL
+  const colors = [...BASE_COLORS];
+  const hueStep = 360 / count;
+  
+  for (let i = BASE_COLORS.length; i < count; i++) {
+    const hue = (i * hueStep) % 360;
+    const saturation = 60 + (i % 3) * 10; // Vary saturation between 60-80
+    const lightness = 50 + (i % 2) * 5; // Vary lightness between 50-55
+    colors.push(`hsl(${hue}, ${saturation}%, ${lightness}%)`);
+  }
+  
+  return colors;
+};
 
 const DonutChart = ({ majorCounts, minorCounts }) => {
   const [viewMode, setViewMode] = useState('major'); // 'major' or 'minor'
@@ -22,6 +48,9 @@ const DonutChart = ({ majorCounts, minorCounts }) => {
 
   const chartData = viewMode === 'major' ? majorData : minorData;
 
+  // Generate unique colors for the current data
+  const colors = useMemo(() => generateUniqueColors(chartData.length), [chartData.length]);
+
   const renderLabel = (entry) => {
     return `${entry.name}: ${entry.value.toLocaleString()}`;
   };
@@ -29,7 +58,7 @@ const DonutChart = ({ majorCounts, minorCounts }) => {
   return (
     <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl font-semibold text-gray-900"> Data Universe Distribution Chart</h2>
+        <h2 className="text-xl font-semibold text-gray-900">OpenGIN Distribution Chart</h2>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setViewMode('major')}
@@ -66,7 +95,7 @@ const DonutChart = ({ majorCounts, minorCounts }) => {
             dataKey="value"
           >
             {chartData.map((entry, index) => (
-              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+              <Cell key={`cell-${index}`} fill={colors[index]} />
             ))}
           </Pie>
           <Tooltip />
