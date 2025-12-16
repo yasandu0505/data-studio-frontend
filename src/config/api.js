@@ -9,6 +9,8 @@ export const API_ENDPOINTS = {
     `${API_BASE_URL}/entities/${entityId}/metadata`,
   ENTITY_RELATIONS: (entityId) => 
     `${API_BASE_URL}/entities/${entityId}/relations`,
+  ENTITY_CATEGORIES_TREE: (entityId) => 
+    `${API_BASE_URL}/entities/${entityId}/categories-tree-datasets`,
 };
 
 export default API_BASE_URL;

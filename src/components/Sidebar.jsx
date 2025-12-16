@@ -19,9 +19,9 @@ const Sidebar = () => {
       <div className="sidebar-header p-6 border-b border-gray-200">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-blue-500 rounded-lg flex items-center justify-center text-white font-bold text-xl">
-            DV
+            OG
           </div>
-          <span className="text-xl font-semibold text-gray-900">DataVerse</span>
+          <span className="text-xl font-semibold text-gray-900">OpenGIN</span>
         </div>
       </div>
       <nav className="sidebar-nav flex-1 p-4">

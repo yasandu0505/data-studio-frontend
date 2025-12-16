@@ -1,25 +1,29 @@
 import { useState, useMemo } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recharts';
 
-// Extended color palette with many distinct colors
+// Extended color palette with many distinct colors (all unique)
 const BASE_COLORS = [
   '#3B82F6', '#8B5CF6', '#F59E0B', '#10B981', '#EF4444', '#06B6D4',
   '#EC4899', '#14B8A6', '#F97316', '#6366F1', '#84CC16', '#EAB308',
-  '#A855F7', '#06B6D4', '#F43F5E', '#22C55E', '#3B82F6', '#8B5CF6',
-  '#F59E0B', '#10B981', '#EF4444', '#EC4899', '#14B8A6', '#F97316'
+  '#A855F7', '#F43F5E', '#22C55E', '#0EA5E9', '#A21CAF', '#DC2626',
+  '#16A34A', '#CA8A04', '#9333EA', '#BE185D', '#0891B2', '#059669',
+  '#D97706', '#7C3AED', '#C026D3', '#EA580C', '#0284C7', '#0D9488'
 ];
 
 // Generate unique colors for each item
 const generateUniqueColors = (count) => {
-  if (count <= BASE_COLORS.length) {
-    return BASE_COLORS.slice(0, count);
+  // Remove duplicates from base colors (safety check)
+  const uniqueBaseColors = [...new Set(BASE_COLORS)];
+  
+  if (count <= uniqueBaseColors.length) {
+    return uniqueBaseColors.slice(0, count);
   }
   
   // If we need more colors, generate them using HSL
-  const colors = [...BASE_COLORS];
+  const colors = [...uniqueBaseColors];
   const hueStep = 360 / count;
   
-  for (let i = BASE_COLORS.length; i < count; i++) {
+  for (let i = uniqueBaseColors.length; i < count; i++) {
     const hue = (i * hueStep) % 360;
     const saturation = 60 + (i % 3) * 10; // Vary saturation between 60-80
     const lightness = 50 + (i % 2) * 5; // Vary lightness between 50-55
