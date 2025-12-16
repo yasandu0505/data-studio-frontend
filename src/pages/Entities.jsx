@@ -7,10 +7,22 @@ const decodeProtobufString = (nameString) => {
   try {
     const parsed = JSON.parse(nameString);
     if (parsed.typeUrl && parsed.value) {
-      // The value is a hex-encoded string
+      // The value is a hex-encoded string with protobuf encoding
       const hexString = parsed.value;
+      
+      // Skip protobuf tag (0A = field 1, wire type 2) and length byte
+      // Format: 0A [length] [string data]
+      let startIndex = 0;
+      if (hexString.startsWith('0A')) {
+        // Skip the tag byte (0A = 2 hex chars)
+        // Next byte is the length (varint, but for strings < 128, it's just one byte)
+        // So we skip: tag (2 chars) + length (2 chars) = 4 hex characters
+        startIndex = 4;
+      }
+      
+      // Decode the actual string content
       let result = '';
-      for (let i = 0; i < hexString.length; i += 2) {
+      for (let i = startIndex; i < hexString.length; i += 2) {
         const hex = hexString.substr(i, 2);
         const charCode = parseInt(hex, 16);
         if (charCode > 0) {
@@ -36,12 +48,18 @@ const Entities = () => {
   const [offset, setOffset] = useState(0);
   const limit = 50;
   
-  // Relations panel state
+  // Detail view state
   const [selectedEntity, setSelectedEntity] = useState(null);
+  const [metadata, setMetadata] = useState(null);
   const [relations, setRelations] = useState(null);
+  const [datasets, setDatasets] = useState(null);
+  const [metadataLoading, setMetadataLoading] = useState(false);
   const [relationsLoading, setRelationsLoading] = useState(false);
+  const [datasetsLoading, setDatasetsLoading] = useState(false);
+  const [metadataError, setMetadataError] = useState(null);
   const [relationsError, setRelationsError] = useState(null);
-  const [isPanelOpen, setIsPanelOpen] = useState(false);
+  const [datasetsError, setDatasetsError] = useState(null);
+  const [showDetailView, setShowDetailView] = useState(false);
 
   useEffect(() => {
     if (!major || !minor) {
@@ -102,38 +120,328 @@ const Entities = () => {
 
   const handleEntityClick = async (entity) => {
     setSelectedEntity(entity);
-    setIsPanelOpen(true);
-    setRelationsLoading(true);
+    setShowDetailView(true);
+    setMetadataError(null);
     setRelationsError(null);
+    setDatasetsError(null);
+    setMetadata(null);
+    setRelations(null);
+    setDatasets(null);
 
-    try {
-      const response = await fetch(API_ENDPOINTS.ENTITY_RELATIONS(entity.id));
-      if (!response.ok) {
-        throw new Error('Failed to fetch relations');
+    // Fetch metadata independently
+    const fetchMetadata = async () => {
+      setMetadataLoading(true);
+      try {
+        const response = await fetch(API_ENDPOINTS.ENTITY_METADATA(entity.id));
+        if (!response.ok) {
+          throw new Error('Failed to fetch metadata');
+        }
+        const result = await response.json();
+        setMetadata(result);
+        setMetadataError(null);
+      } catch (err) {
+        setMetadataError(err.message);
+        console.error('Error fetching metadata:', err);
+      } finally {
+        setMetadataLoading(false);
       }
-      const result = await response.json();
-      setRelations(result);
-    } catch (err) {
-      setRelationsError(err.message);
-      console.error('Error fetching relations:', err);
-    } finally {
-      setRelationsLoading(false);
-    }
+    };
+
+    // Fetch relations independently
+    const fetchRelations = async () => {
+      setRelationsLoading(true);
+      try {
+        const response = await fetch(API_ENDPOINTS.ENTITY_RELATIONS(entity.id));
+        if (!response.ok) {
+          throw new Error('Failed to fetch relations');
+        }
+        const result = await response.json();
+        setRelations(result);
+        setRelationsError(null);
+      } catch (err) {
+        setRelationsError(err.message);
+        console.error('Error fetching relations:', err);
+      } finally {
+        setRelationsLoading(false);
+      }
+    };
+
+    // Fetch datasets independently
+    const fetchDatasets = async () => {
+      setDatasetsLoading(true);
+      try {
+        const response = await fetch(API_ENDPOINTS.ENTITY_CATEGORIES_TREE(entity.id));
+        if (!response.ok) {
+          throw new Error('Failed to fetch datasets');
+        }
+        const result = await response.json();
+        setDatasets(result);
+        setDatasetsError(null);
+      } catch (err) {
+        setDatasetsError(err.message);
+        console.error('Error fetching datasets:', err);
+      } finally {
+        setDatasetsLoading(false);
+      }
+    };
+
+    // Call all three in parallel - they will update independently
+    fetchMetadata();
+    fetchRelations();
+    fetchDatasets();
   };
 
-  const closePanel = () => {
-    setIsPanelOpen(false);
+  const closeDetailView = () => {
+    setShowDetailView(false);
     setSelectedEntity(null);
+    setMetadata(null);
     setRelations(null);
+    setDatasets(null);
+  };
+
+  // Color scheme for different tree levels
+  const levelColors = [
+    { bg: 'bg-blue-50', border: 'border-blue-200', hover: 'hover:bg-blue-100' },      // Level 0
+    { bg: 'bg-purple-50', border: 'border-purple-200', hover: 'hover:bg-purple-100' }, // Level 1
+    { bg: 'bg-green-50', border: 'border-green-200', hover: 'hover:bg-green-100' },    // Level 2
+    { bg: 'bg-yellow-50', border: 'border-yellow-200', hover: 'hover:bg-yellow-100' }, // Level 3
+    { bg: 'bg-pink-50', border: 'border-pink-200', hover: 'hover:bg-pink-100' },      // Level 4
+    { bg: 'bg-indigo-50', border: 'border-indigo-200', hover: 'hover:bg-indigo-100' }, // Level 5
+    { bg: 'bg-orange-50', border: 'border-orange-200', hover: 'hover:bg-orange-100' }, // Level 6
+    { bg: 'bg-teal-50', border: 'border-teal-200', hover: 'hover:bg-teal-100' },      // Level 7
+  ];
+
+  // Recursive component to render tree structure
+  const renderTreeItem = (item, level = 0) => {
+    const indent = level * 24;
+    const hasChildren = item.children && item.children.length > 0;
+    const hasAttributes = item.attributes && item.attributes.length > 0;
+    
+    // Get color for current level (cycle through if level exceeds available colors)
+    const colorScheme = levelColors[level % levelColors.length];
+
+    return (
+      <div key={item.relatedEntityId || item.entityId} className="mb-2">
+        <div 
+          className={`${colorScheme.bg} rounded-lg p-4 border ${colorScheme.border} ${colorScheme.hover} transition-colors`}
+          style={{ marginLeft: `${indent}px` }}
+        >
+          <div className="mb-2">
+            <p className="text-sm font-mono text-gray-600">{item.relatedEntityId || item.entityId}</p>
+          </div>
+          <div className="mb-2">
+            <p className="text-base font-medium text-gray-900">
+              {decodeProtobufString(item.name)}
+            </p>
+          </div>
+          <div className="flex items-center gap-4 text-sm text-gray-600">
+            <span>
+              <span className="font-medium">Direction:</span> {item.direction || 'N/A'}
+            </span>
+            <span>
+              <span className="font-medium">Start:</span> {formatDate(item.startTime)}
+            </span>
+            {item.endTime && (
+              <span>
+                <span className="font-medium">End:</span> {formatDate(item.endTime)}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Render attributes if present */}
+        {hasAttributes && (
+          <div style={{ marginLeft: `${indent + 24}px` }}>
+            {item.attributes.map((attr) => (
+              <div 
+                key={attr.relatedEntityId}
+                className="bg-blue-50 rounded-lg p-3 border border-blue-200 mb-2"
+              >
+                <div className="mb-1">
+                  <p className="text-xs font-mono text-gray-600">{attr.relatedEntityId}</p>
+                </div>
+                <div className="mb-1">
+                  <p className="text-sm font-medium text-gray-900">
+                    {decodeProtobufString(attr.name)}
+                  </p>
+                </div>
+                <div className="flex items-center gap-4 text-xs text-gray-600">
+                  <span>
+                    <span className="font-medium">Direction:</span> {attr.direction || 'N/A'}
+                  </span>
+                  <span>
+                    <span className="font-medium">Start:</span> {formatDate(attr.startTime)}
+                  </span>
+                  {attr.endTime && (
+                    <span>
+                      <span className="font-medium">End:</span> {formatDate(attr.endTime)}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Recursively render children */}
+        {hasChildren && (
+          <div>
+            {item.children.map((child) => renderTreeItem(child, level + 1))}
+          </div>
+        )}
+      </div>
+    );
   };
 
   // Flatten relations array - each item has a body array
   const flattenedRelations = relations?.flatMap(item => item.body || []) || [];
 
+  const goBack = () => {
+    closeDetailView();
+  };
+
+  // If detail view is shown, display metadata
+  if (showDetailView && selectedEntity) {
+    return (
+      <div className="entities-container p-8">
+        {/* Back Button */}
+        <button
+          onClick={goBack}
+          className="mb-6 flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
+        >
+          <span>←</span>
+          <span>Back to Entities</span>
+        </button>
+
+        {/* Entity Header */}
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">
+            {decodeProtobufString(selectedEntity.name)}
+          </h1>
+          <p className="text-sm text-gray-600 font-mono">{selectedEntity.id}</p>
+        </div>
+
+        {/* Metadata Section */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+          <h2 className="text-2xl font-semibold text-gray-900 mb-6">Metadata</h2>
+          
+          {metadataLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="flex flex-col items-center gap-3">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                <div className="text-gray-500">Loading metadata...</div>
+              </div>
+            </div>
+          ) : metadataError ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="text-red-500">Error: {metadataError}</div>
+            </div>
+          ) : metadata && Object.keys(metadata).length > 0 ? (
+            <div className="space-y-6">
+              {Object.entries(metadata).map(([key, value]) => (
+                <div key={key} className="border-b border-gray-200 pb-4 last:border-b-0 last:pb-0">
+                  <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-2">
+                    {key.replace(/_/g, ' ')}
+                  </h3>
+                  <p className="text-gray-900 break-words">
+                    {decodeProtobufString(value)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex items-center justify-center py-12">
+              <div className="text-gray-500">No metadata found</div>
+            </div>
+          )}
+        </div>
+
+        {/* Relationships Section */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <h2 className="text-2xl font-semibold text-gray-900 mb-6">Relationships</h2>
+          
+          {relationsLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="flex flex-col items-center gap-3">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500"></div>
+                <div className="text-gray-500">Loading relationships...</div>
+              </div>
+            </div>
+          ) : relationsError ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="text-red-500">Error: {relationsError}</div>
+            </div>
+          ) : flattenedRelations.length > 0 ? (
+            <div className="space-y-4">
+              {flattenedRelations.map((relation, index) => (
+                <div 
+                  key={`${relation.id}-${index}`}
+                  className="bg-gray-50 rounded-lg p-4 border border-gray-200 hover:bg-gray-100 transition-colors"
+                >
+                  <div className="mb-2">
+                    <p className="text-sm font-mono text-gray-600">{relation.id}</p>
+                  </div>
+                  <div className="mb-2">
+                    <p className="text-base font-medium text-gray-900">
+                      {decodeProtobufString(relation.name)}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-4 text-sm text-gray-600">
+                    <span>
+                      <span className="font-medium">Type:</span> {relation.kind?.major} - {relation.kind?.minor}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-4 text-sm text-gray-600 mt-2">
+                    <span>
+                      <span className="font-medium">Created:</span> {formatDate(relation.created)}
+                    </span>
+                    <span>
+                      <span className="font-medium">Status:</span> {relation.terminated ? formatDate(relation.terminated) : 'Active'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex items-center justify-center py-12">
+              <div className="text-gray-500">No relationships found</div>
+            </div>
+          )}
+        </div>
+
+        {/* Datasets Section */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mt-6">
+          <h2 className="text-2xl font-semibold text-gray-900 mb-6">Datasets</h2>
+          
+          {datasetsLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="flex flex-col items-center gap-3">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500"></div>
+                <div className="text-gray-500">Loading datasets...</div>
+              </div>
+            </div>
+          ) : datasetsError ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="text-red-500">Error: {datasetsError}</div>
+            </div>
+          ) : datasets && datasets.length > 0 ? (
+            <div className="space-y-4">
+              {datasets.map((dataset) => renderTreeItem(dataset, 0))}
+            </div>
+          ) : (
+            <div className="flex items-center justify-center py-12">
+              <div className="text-gray-500">No datasets found</div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="entities-container p-8 relative">
       {/* Header Section */}
-      <div className={`entities-header mb-8 transition-opacity duration-300 ${isPanelOpen ? 'opacity-50' : 'opacity-100'}`}>
+      <div className="entities-header mb-8">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h1 className="text-3xl font-bold text-gray-900 mb-2">
@@ -147,7 +455,7 @@ const Entities = () => {
       </div>
 
       {/* Entities Table */}
-      <div className={`bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden transition-opacity duration-300 ${isPanelOpen ? 'opacity-50' : 'opacity-100'}`}>
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
@@ -214,81 +522,6 @@ const Entities = () => {
           </div>
         </div>
       </div>
-
-      {/* Relations Side Panel */}
-      {isPanelOpen && (
-          <div className={`fixed top-0 left-0 h-full w-1/3 bg-white shadow-2xl z-50 transform transition-transform duration-300 ease-in-out ${
-            isPanelOpen ? 'translate-x-0' : '-translate-x-full'
-          }`}>
-            <div className="h-full flex flex-col">
-              {/* Panel Header */}
-              <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-                <div>
-                  <h2 className="text-xl font-semibold text-gray-900">Relations</h2>
-                  {selectedEntity && (
-                    <p className="text-sm text-gray-600 mt-1">
-                      {decodeProtobufString(selectedEntity.name)}
-                    </p>
-                  )}
-                </div>
-                <button
-                  onClick={closePanel}
-                  className="text-gray-400 hover:text-gray-600 text-2xl"
-                >
-                  ×
-                </button>
-              </div>
-
-              {/* Panel Content */}
-              <div className="flex-1 overflow-y-auto p-6">
-                {relationsLoading ? (
-                  <div className="flex items-center justify-center h-full">
-                    <div className="text-gray-500">Loading relations...</div>
-                  </div>
-                ) : relationsError ? (
-                  <div className="flex items-center justify-center h-full">
-                    <div className="text-red-500">Error: {relationsError}</div>
-                  </div>
-                ) : flattenedRelations.length === 0 ? (
-                  <div className="flex items-center justify-center h-full">
-                    <div className="text-gray-500">No relations found</div>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {flattenedRelations.map((relation, index) => (
-                      <div 
-                        key={`${relation.id}-${index}`}
-                        className="bg-gray-50 rounded-lg p-4 border border-gray-200 hover:bg-gray-100 transition-colors"
-                      >
-                        <div className="mb-2">
-                          <p className="text-sm font-mono text-gray-600">{relation.id}</p>
-                        </div>
-                        <div className="mb-2">
-                          <p className="text-base font-medium text-gray-900">
-                            {decodeProtobufString(relation.name)}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-4 text-sm text-gray-600">
-                          <span>
-                            <span className="font-medium">Type:</span> {relation.kind?.major} - {relation.kind?.minor}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-4 text-sm text-gray-600 mt-2">
-                          <span>
-                            <span className="font-medium">Created:</span> {formatDate(relation.created)}
-                          </span>
-                          <span>
-                            <span className="font-medium">Status:</span> {relation.terminated ? formatDate(relation.terminated) : 'Active'}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-      )}
     </div>
   );
 };
