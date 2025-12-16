@@ -60,6 +60,11 @@ const Entities = () => {
   const [relationsError, setRelationsError] = useState(null);
   const [datasetsError, setDatasetsError] = useState(null);
   const [showDetailView, setShowDetailView] = useState(false);
+  
+  // Metadata editor state
+  const [showMetadataEditor, setShowMetadataEditor] = useState(false);
+  const [metadataPairs, setMetadataPairs] = useState([{ key: '', value: '' }]);
+  const [metadataSaving, setMetadataSaving] = useState(false);
 
   useEffect(() => {
     if (!major || !minor) {
@@ -300,6 +305,101 @@ const Entities = () => {
     closeDetailView();
   };
 
+  const metadataSave = async () => {
+    // Filter out empty pairs
+    const validPairs = metadataPairs.filter(p => p.key.trim() && p.value.trim());
+    
+    if (validPairs.length === 0) {
+      alert('Please add at least one key-value pair');
+      return;
+    }
+
+    // Check for duplicate keys within the new pairs
+    const keys = validPairs.map(p => p.key.trim());
+    const duplicateKeysInNew = keys.filter((key, index) => keys.indexOf(key) !== index);
+    
+    if (duplicateKeysInNew.length > 0) {
+      const uniqueDuplicates = [...new Set(duplicateKeysInNew)];
+      alert(`The following key(s) are duplicated in your input: ${uniqueDuplicates.join(', ')}. Please use different keys.`);
+      return;
+    }
+
+    // Get existing metadata and decode values
+    const existingMetadata = metadata || {};
+    const decodedExistingMetadata = {};
+    Object.entries(existingMetadata).forEach(([key, value]) => {
+      decodedExistingMetadata[key] = decodeProtobufString(value);
+    });
+    
+    // Check for duplicate keys against existing metadata
+    const duplicateKeysInExisting = keys.filter(key => decodedExistingMetadata.hasOwnProperty(key));
+    
+    if (duplicateKeysInExisting.length > 0) {
+      alert(`The following key(s) already exist in metadata: ${duplicateKeysInExisting.join(', ')}. Please use different keys.`);
+      return;
+    }
+
+    // Merge with existing metadata (no duplicates, so safe to merge)
+    const mergedMetadata = { ...decodedExistingMetadata };
+    validPairs.forEach(pair => {
+      mergedMetadata[pair.key.trim()] = pair.value.trim();
+    });
+
+    // Format as [{key: value}, {key: value}]
+    const formattedMetadata = Object.entries(mergedMetadata).map(([key, value]) => ({
+      [key]: value
+    }));
+
+    // Send to API endpoint
+    if (!selectedEntity) {
+      alert('No entity selected');
+      return;
+    }
+
+    setMetadataSaving(true);
+    try {
+      const response = await fetch(API_ENDPOINTS.ENTITY_METADATA_POST(selectedEntity.id), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(formattedMetadata),
+      });
+      console.log(formattedMetadata);
+
+      console.log(response);
+
+      if (!response.ok) {
+        throw new Error('Failed to save metadata');
+      }
+
+      // Refresh metadata after successful save
+      const fetchMetadata = async () => {
+        try {
+          const metadataResponse = await fetch(API_ENDPOINTS.ENTITY_METADATA(selectedEntity.id));
+          if (metadataResponse.ok) {
+            const result = await metadataResponse.json();
+            setMetadata(result);
+            setMetadataError(null);
+          }
+        } catch (err) {
+          console.error('Error refreshing metadata:', err);
+        }
+      };
+
+      await fetchMetadata();
+
+      // Close editor and reset form
+      setShowMetadataEditor(false);
+      setMetadataPairs([{ key: '', value: '' }]);
+    } catch (err) {
+      alert(`Failed to save metadata: ${err.message}`);
+      console.error('Error saving metadata:', err);
+    } finally {
+      setMetadataSaving(false);
+    }
+  };
+
   // If detail view is shown, display metadata
   if (showDetailView && selectedEntity) {
     return (
@@ -323,7 +423,80 @@ const Entities = () => {
 
         {/* Metadata Section */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
-          <h2 className="text-2xl font-semibold text-gray-900 mb-6">Metadata</h2>
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-semibold text-gray-900">Metadata</h2>
+            <button
+              onClick={() => {
+                setShowMetadataEditor(!showMetadataEditor);
+                if (!showMetadataEditor) {
+                  setMetadataPairs([{ key: '', value: '' }]);
+                }
+              }}
+              className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm font-medium"
+            >
+              {showMetadataEditor ? 'Cancel' : '+ Add Metadata'}
+            </button>
+          </div>
+
+          {/* Metadata Editor Form */}
+          {showMetadataEditor && (
+            <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Add Metadata</h3>
+              <div className="space-y-3">
+                {metadataPairs.map((pair, index) => (
+                  <div key={index} className="flex gap-2 items-start">
+                    <input
+                      type="text"
+                      placeholder="Key"
+                      value={pair.key}
+                      onChange={(e) => {
+                        const newPairs = [...metadataPairs];
+                        newPairs[index].key = e.target.value;
+                        setMetadataPairs(newPairs);
+                      }}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Value"
+                      value={pair.value}
+                      onChange={(e) => {
+                        const newPairs = [...metadataPairs];
+                        newPairs[index].value = e.target.value;
+                        setMetadataPairs(newPairs);
+                      }}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    {metadataPairs.length > 1 && (
+                      <button
+                        onClick={() => {
+                          setMetadataPairs(metadataPairs.filter((_, i) => i !== index));
+                        }}
+                        className="px-3 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button
+                  onClick={() => setMetadataPairs([...metadataPairs, { key: '', value: '' }])}
+                  className="w-full px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors text-sm font-medium"
+                >
+                  + Add Another Pair
+                </button>
+                <div className="flex gap-2 pt-2">
+                  <button
+                    onClick={metadataSave}
+                    disabled={metadataSaving}
+                    className="flex-1 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {metadataSaving ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           
           {metadataLoading ? (
             <div className="flex items-center justify-center py-12">

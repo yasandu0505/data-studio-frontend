@@ -7,6 +7,8 @@ export const API_ENDPOINTS = {
     `${API_BASE_URL}/entities?major=${major}&minor=${minor}&offset=${offset}&limit=${limit}`,
   ENTITY_METADATA: (entityId) => 
     `${API_BASE_URL}/entities/${entityId}/metadata`,
+  ENTITY_METADATA_POST: (entityId) => 
+    `${API_BASE_URL}/entities/${entityId}/metadata-add`,
   ENTITY_RELATIONS: (entityId) => 
     `${API_BASE_URL}/entities/${entityId}/relations`,
   ENTITY_CATEGORIES_TREE: (entityId) => 
