@@ -6,8 +6,6 @@ const Sidebar = () => {
   const menuItems = [
     { path: '/', label: 'Dashboard', icon: '🏠' },
     { path: '/entities', label: 'Entities', icon: '🗄️' },
-    { path: '/relationships', label: 'Relationships', icon: '🌐' },
-    { path: '/metadata', label: 'Metadata', icon: '🏷️' },
   ];
 
   const getIcon = (icon) => {

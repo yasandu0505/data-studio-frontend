@@ -12,8 +12,6 @@ function App() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/entities" element={<Entities />} />
-            <Route path="/relationships" element={<div className="p-8">Relationships page coming soon...</div>} />
-            <Route path="/metadata" element={<div className="p-8">Metadata page coming soon...</div>} />
           </Routes>
         </main>
       </div>
